@@ -1,22 +1,53 @@
 # 🔗 AI Workshop — Track Backend
 
-Задание: создать микросервис URL-сокращатель.
+Задание: создать URL-сокращатель как локальное Python-приложение на FastAPI.
 
-- REST API на Python (FastAPI или Flask)
-- SQLite
-- Docker
-- nginx как reverse proxy
+## Формат решения
 
-Эндпоинты:
+- REST API на Python (FastAPI)
+- SQLite (`urls.db` рядом с проектом)
+- Локальный запуск без Docker/nginx/compose
+
+## Структура проекта
+
+- `main.py` — точка входа, запуск uvicorn
+- `app/` — роуты, модели, сервисы
+- `db.py` — работа с SQLite
+- `tests/` — тесты
+- `requirements.txt` — зависимости (`fastapi`, `uvicorn`)
+
+## Эндпоинты
+
 - `POST /shorten`
-- `GET /{code}` (302 redirect)
+- `GET /{code}` (редирект)
 - `GET /stats/{code}`
 - `GET /health`
 
-Запуск:
+## Локальный запуск
 
 ```bash
-docker-compose up
+pip install -r requirements.txt && python main.py
 ```
 
-Бонус: `.github/workflows/ci.yml` с lint, test, docker build.
+Сервер должен стартовать на `http://localhost:8000`.
+
+## Проверка
+
+```bash
+curl http://localhost:8000/health
+bash sample_requests.sh
+```
+
+## Advanced (бонус)
+
+1. Добавить middleware логирования в `access.log`:
+   - timestamp
+   - method
+   - path
+   - status code
+   - response time
+2. Добавить `GET /stats/dashboard` с агрегатами:
+   - общее количество ссылок
+   - общее количество переходов
+   - топ-5 самых кликабельных ссылок
+   - запросы в минуту за последний час
