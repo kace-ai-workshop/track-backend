@@ -1,0 +1,14 @@
+---
+description: Workshop rules
+globs: "**/*"
+---
+
+# Workshop rules
+
+- Стек: FastAPI, SQLite, Docker, nginx.
+- Без Redis.
+- Без PostgreSQL.
+- Dockerfile: `python:3.11-slim`.
+- docker-compose: только `app` и `nginx`.
+- nginx на 80 порту, прокси на `app:8000`.
+- Делай по одной подзадаче.
