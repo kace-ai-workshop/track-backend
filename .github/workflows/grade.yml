@@ -12,6 +12,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Check PROJECT and TASK
+        shell: bash
         run: |
           [ -f PROJECT.md ] && [ -f TASK.md ]
           p=$(wc -l < PROJECT.md)
@@ -30,19 +31,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Docker smoke
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Local API smoke test
+        shell: bash
         run: |
-          docker compose build
-          docker compose up -d
-          sleep 15
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+          python main.py > server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          sleep 5
+
           {
-            echo "## Runtime"
-            echo "### /health"
-            curl -sS http://localhost/health || true
+            echo "## Runtime checks"
+            echo
+            echo "### GET /health"
+            curl -sS http://localhost:8000/health
+            echo
             echo "### POST /shorten"
-            curl -sS -X POST http://localhost/shorten -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' || true
+            CREATE=$(curl -sS -X POST http://localhost:8000/shorten -H 'Content-Type: application/json' -d '{"url":"https://example.com"}')
+            echo "$CREATE"
+            CODE=$(echo "$CREATE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('short_code') or d.get('code') or '')")
+            echo "short_code=$CODE"
+            echo
+            echo "### GET /{code} status"
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8000/$CODE")
+            echo "redirect_status=$STATUS"
           } >> "$GITHUB_STEP_SUMMARY"
-          docker compose down
+
+          [ -n "$CODE" ]
+          [ "$STATUS" = "302" ]
+
+          kill $SERVER_PID
+          wait $SERVER_PID || true
 
   llm-review:
     runs-on: ubuntu-latest
@@ -52,21 +78,31 @@ jobs:
         with:
           fetch-depth: 0
       - name: LLM review
+        shell: bash
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          set -e
+          set -euo pipefail
           OUT=review_input.txt
           {
-            echo "# RUBRIC"; cat rubric.md; echo
-            echo "# PROJECT"; cat PROJECT.md; echo
-            echo "# TASK"; cat TASK.md; echo
-            echo "# GIT LOG"; git log --oneline -n 50
+            echo "# RUBRIC"
+            cat rubric.md
+            echo
+            echo "# PROJECT"
+            cat PROJECT.md 2>/dev/null || true
+            echo
+            echo "# TASK"
+            cat TASK.md 2>/dev/null || true
+            echo
+            echo "# GIT LOG"
+            git log --oneline -n 50
           } > "$OUT"
-          for f in $(find . -name "*.py" -o -name "Dockerfile" -o -name "docker-compose.yml" -o -name "nginx.conf" | sort); do
+
+          for f in $(find . -name "*.py" -o -name "requirements.txt" -o -name ".env.example" | sort); do
             echo "## FILE: $f" >> "$OUT"
             sed -n '1,200p' "$f" >> "$OUT"
           done
+
           python3 -c "from pathlib import Path; p=Path('review_input.txt'); p.write_text(p.read_text(encoding='utf-8', errors='ignore')[:15000], encoding='utf-8')"
           PAYLOAD=$(python3 -c "import json, pathlib; prompt=pathlib.Path('review_input.txt').read_text(encoding='utf-8', errors='ignore'); print(json.dumps({'model':'claude-sonnet-4-20250514','max_tokens':2000,'messages':[{'role':'user','content':prompt+'\n\nОцени строго по рубрике, ответь только JSON.'}]}, ensure_ascii=False))")
           curl -sS https://api.anthropic.com/v1/messages -H "content-type: application/json" -H "x-api-key: ${ANTHROPIC_API_KEY}" -H "anthropic-version: 2023-06-01" -d "$PAYLOAD" > anthropic_response.json
@@ -74,10 +110,10 @@ jobs:
           {
             echo "## LLM review"
             echo
-            echo '\`\`\`json'
+            echo '```json'
             cat llm_review.json
             echo
-            echo '\`\`\`'
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
@@ -86,3 +122,4 @@ jobs:
             review_input.txt
             anthropic_response.json
             llm_review.json
+            server.log
