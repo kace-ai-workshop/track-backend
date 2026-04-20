@@ -5,10 +5,10 @@ globs: "**/*"
 
 # Workshop rules
 
-- Стек: FastAPI, SQLite, Docker, nginx.
-- Без Redis.
-- Без PostgreSQL.
-- Dockerfile: `python:3.11-slim`.
-- docker-compose: только `app` и `nginx`.
-- nginx на 80 порту, прокси на `app:8000`.
-- Делай по одной подзадаче.
+- Стек: FastAPI, SQLite, uvicorn.
+- Без Docker.
+- Без nginx.
+- Без внешних БД (Redis/PostgreSQL и т.п.).
+- Приложение запускается через `python main.py` на порту `8000`.
+- Конфигурация через `.env` или аргументы командной строки.
+- Выполняй по одной подзадаче и останавливайся после каждой.
