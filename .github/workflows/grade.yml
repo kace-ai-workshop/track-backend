@@ -1,0 +1,88 @@
+name: Grade Backend Track
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check-structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check PROJECT and TASK
+        run: |
+          [ -f PROJECT.md ] && [ -f TASK.md ]
+          p=$(wc -l < PROJECT.md)
+          t=$(wc -l < TASK.md)
+          c=$(git rev-list --count HEAD)
+          {
+            echo "## Structure"
+            echo "| Metric | Value |"
+            echo "|---|---:|"
+            echo "| PROJECT lines | $p |"
+            echo "| TASK lines | $t |"
+            echo "| Commits | $c |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker smoke
+        run: |
+          docker compose build
+          docker compose up -d
+          sleep 15
+          {
+            echo "## Runtime"
+            echo "### /health"
+            curl -sS http://localhost/health || true
+            echo "### POST /shorten"
+            curl -sS -X POST http://localhost/shorten -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker compose down
+
+  llm-review:
+    runs-on: ubuntu-latest
+    needs: [check-structure, build-and-test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: LLM review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -e
+          OUT=review_input.txt
+          {
+            echo "# RUBRIC"; cat rubric.md; echo
+            echo "# PROJECT"; cat PROJECT.md; echo
+            echo "# TASK"; cat TASK.md; echo
+            echo "# GIT LOG"; git log --oneline -n 50
+          } > "$OUT"
+          for f in $(find . -name "*.py" -o -name "Dockerfile" -o -name "docker-compose.yml" -o -name "nginx.conf" | sort); do
+            echo "## FILE: $f" >> "$OUT"
+            sed -n '1,200p' "$f" >> "$OUT"
+          done
+          python3 -c "from pathlib import Path; p=Path('review_input.txt'); p.write_text(p.read_text(encoding='utf-8', errors='ignore')[:15000], encoding='utf-8')"
+          PAYLOAD=$(python3 -c "import json, pathlib; prompt=pathlib.Path('review_input.txt').read_text(encoding='utf-8', errors='ignore'); print(json.dumps({'model':'claude-sonnet-4-20250514','max_tokens':2000,'messages':[{'role':'user','content':prompt+'\n\nОцени строго по рубрике, ответь только JSON.'}]}, ensure_ascii=False))")
+          curl -sS https://api.anthropic.com/v1/messages -H "content-type: application/json" -H "x-api-key: ${ANTHROPIC_API_KEY}" -H "anthropic-version: 2023-06-01" -d "$PAYLOAD" > anthropic_response.json
+          python3 -c "import json, pathlib; raw=json.loads(pathlib.Path('anthropic_response.json').read_text(encoding='utf-8', errors='ignore')); text=raw.get('content',[{}])[0].get('text','') if isinstance(raw.get('content'),list) else ''; pathlib.Path('llm_review.json').write_text(text, encoding='utf-8'); print(text)"
+          {
+            echo "## LLM review"
+            echo
+            echo '\`\`\`json'
+            cat llm_review.json
+            echo
+            echo '\`\`\`'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llm-review-backend
+          path: |
+            review_input.txt
+            anthropic_response.json
+            llm_review.json
