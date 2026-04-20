@@ -10,16 +10,7 @@ echo "== 2) POST /shorten =="
 CREATE_RESPONSE=$(curl -sS -X POST "$BASE_URL/shorten" -H "Content-Type: application/json" -d '{"url": "https://example.com"}')
 echo "$CREATE_RESPONSE" | python3 -m json.tool
 
-SHORT_CODE=$(python3 - <<'PY2'
-import json,sys
-print((json.loads(sys.stdin.read()).get('short_code') or json.loads(sys.stdin.read()).get('code') or '').strip())
-PY2
-<<< "$CREATE_RESPONSE")
-
-if [ -z "$SHORT_CODE" ]; then
-  SHORT_CODE=$(echo "$CREATE_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('short_code') or d.get('code') or '')")
-fi
-
+SHORT_CODE=$(echo "$CREATE_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('short_code') or d.get('code') or '')")
 [ -n "$SHORT_CODE" ] || { echo "short_code not found"; exit 1; }
 
 echo "== 3) GET /{code} (expect 302) =="
